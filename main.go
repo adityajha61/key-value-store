@@ -51,7 +51,6 @@ func HandleGet(kv *keyvaluestore.KeyValueStore) http.HandlerFunc {
 } 
 func main() {
 	kv := keyvaluestore.NewKeyValueStore(4,2)
-
 	http.HandleFunc("/set", HandleSet(kv))
 	http.HandleFunc("/get", HandleGet(kv))
 
