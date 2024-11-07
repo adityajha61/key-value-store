@@ -24,7 +24,7 @@ func HandleSet(kv *keyvaluestore.KeyValueStore) http.HandlerFunc {
 		if req.TTL == 0 {
 			req.TTL = 5*time.Minute
 		}
-		
+
 		fmt.Print(req)
 		kv.Set(req.Key, req.Value, req.TTL)
 		w.WriteHeader(http.StatusOK)
@@ -50,7 +50,7 @@ func HandleGet(kv *keyvaluestore.KeyValueStore) http.HandlerFunc {
 	}
 } 
 func main() {
-	kv := keyvaluestore.NewKeyValueStore()
+	kv := keyvaluestore.NewKeyValueStore(4,2)
 
 	http.HandleFunc("/set", HandleSet(kv))
 	http.HandleFunc("/get", HandleGet(kv))

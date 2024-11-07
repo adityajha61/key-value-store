@@ -10,33 +10,51 @@ type KeyValue struct {
 	Expiry time.Time
 }
 
-type KeyValueStore struct {
+type Shard struct {
 	data map[string]KeyValue
 	mu map[string]*sync.RWMutex
 	muControl sync.RWMutex
 }
 
-func NewKeyValueStore() *KeyValueStore {
-	return &KeyValueStore{
-		data: make(map[string]KeyValue),
+type KeyValueStore struct {
+	shards []*Shard
+	replicas int
+}
+
+func NewKeyValueStore(numShards, numReplicas int) *KeyValueStore {
+	store := &KeyValueStore{
+		shards: make([]*Shard, numShards),
+		replicas: numReplicas,
 	}
+
+	for i:=0;i<numShards;i++ {
+		store.shards[i] = &Shard{data: make(map[string]KeyValue)}
+	}
+
+	return store
 }
 
 func (kv *KeyValueStore) Set(key, value string, ttl time.Duration) {
-	kv.getLock(key).Lock()
-	defer kv.getLock(key).Unlock()
+	shardIndex := kv.GetShardIndex(key)
+	shard := kv.shards[shardIndex]
+	shard.getLock(key).Lock()
+	defer shard.getLock(key).Unlock()
 	expiry := time.Now().Add(ttl)
-	kv.data[key] = KeyValue{
+
+	shard.data[key] = KeyValue{
 		Value: value,
 		Expiry: expiry,
 	}
 }
 
 func (kv *KeyValueStore) Get(key string) (string,bool) {
-	kv.getLock(key).RLock()
-	defer kv.getLock(key).RUnlock()
+	shardIndex := kv.GetShardIndex(key)
+	shard := kv.shards[shardIndex]
 
-	item, ok := kv.data[key]
+	shard.getLock(key).RLock()
+	defer shard.getLock(key).RUnlock()
+
+	item, ok := shard.data[key]
 	if !ok {
 		return "",false
 	}
@@ -44,11 +62,11 @@ func (kv *KeyValueStore) Get(key string) (string,bool) {
 	if item.Expiry.IsZero() || time.Now().Before(item.Expiry) {
 		return item.Value,true
 	}
-	kv.deleteKey(key)
+	shard.deleteKey(key)
 	return "",false
 }
 
-func (kv *KeyValueStore) getLock(key string) *sync.RWMutex {
+func (kv *Shard) getLock(key string) *sync.RWMutex {
 	kv.muControl.Lock()
 	defer kv.muControl.Unlock()
 
@@ -63,10 +81,27 @@ func (kv *KeyValueStore) getLock(key string) *sync.RWMutex {
 	return kv.mu[key]
 }
 
-func (kv *KeyValueStore) deleteKey(key string){
-	kv.muControl.Lock()
-	defer kv.muControl.Unlock()
+func (sh *Shard) deleteKey(key string){
+	sh.muControl.Lock()
+	defer sh.muControl.Unlock()
 
-	delete(kv.data,key)
-	delete(kv.mu,key)
+	delete(sh.data,key)
+	delete(sh.mu,key)
+}
+
+func fnvHash(data string) uint32 {
+	const prime = 16777619
+	hash := uint32(2166136261)
+   
+	for i := 0; i < len(data); i++ {
+	 hash ^= uint32(data[i])
+	 hash *= prime
+	}
+   
+	return hash
+   }
+   
+func (kv *KeyValueStore) GetShardIndex(key string) int {
+	hash := fnvHash(key)
+	return int(hash) % len(kv.shards)
 }
